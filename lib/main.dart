@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:ui'; 
-import 'dart:typed_data'; // For handling web image bytes
+import 'dart:typed_data'; 
 import 'dart:math' as math;
+import 'dart:convert'; // Required for ImgBB Base64 conversion
+import 'package:http/http.dart' as http; // Required for making API requests
 
 // Firebase Imports
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker_web/image_picker_web.dart';
 import 'firebase_options.dart'; 
 
@@ -58,10 +59,16 @@ class Memory {
 }
 
 // --- 2. THE MAIN PAGE ---
-class TimelinePage extends StatelessWidget {
+class TimelinePage extends StatefulWidget {
   const TimelinePage({super.key});
 
-  // --- THE ADMIN UPLOAD DIALOG ---
+  @override
+  State<TimelinePage> createState() => _TimelinePageState();
+}
+
+class _TimelinePageState extends State<TimelinePage> {
+
+  // --- THE ADMIN UPLOAD DIALOG (Now using ImgBB) ---
   Future<void> _showAddMemoryDialog(BuildContext context) async {
     final titleController = TextEditingController();
     final noteController = TextEditingController();
@@ -135,30 +142,43 @@ class TimelinePage extends StatelessWidget {
                     setState(() => isUploading = true);
 
                     try {
-                      // 1. Generate unique filename
-                      final fileName = DateTime.now().millisecondsSinceEpoch.toString();
-                      final storageRef = FirebaseStorage.instance.ref().child('memories/$fileName.jpg');
+                      // 1. Convert image to Base64
+                      final String base64Image = base64Encode(selectedImageBytes!);
 
-                      // 2. Upload to Firebase Storage
-                      await storageRef.putData(selectedImageBytes!);
+                      // 2. PASTE YOUR IMGBB API KEY HERE!
+                      final String apiKey = '1900287d47a36f5b9ef8a5882c3b9c19'; 
+                      final Uri apiUrl = Uri.parse('https://api.imgbb.com/1/upload');
 
-                      // 3. Get the public Download URL
-                      final imageUrl = await storageRef.getDownloadURL();
-
-                      // 4. Generate a random tilt for that scrapbook feel
-                      final randomTilt = (math.Random().nextDouble() * 0.12) - 0.06;
-
-                      // 5. Save to Firestore
-                      await FirebaseFirestore.instance.collection('memories').add({
-                        'date': dateController.text,
-                        'title': titleController.text,
-                        'note': noteController.text,
-                        'tilt': randomTilt,
-                        'imageUrl': imageUrl,
-                        'timestamp': FieldValue.serverTimestamp(),
+                      // 3. Send to ImgBB
+                      final response = await http.post(apiUrl, body: {
+                        'key': apiKey,
+                        'image': base64Image,
                       });
 
-                      if (context.mounted) Navigator.pop(context); // Close dialog
+                      final Map<String, dynamic> responseData = jsonDecode(response.body);
+
+                      if (responseData['success'] == true) {
+                        // 4. Extract the public URL
+                        final String imageUrl = responseData['data']['url'];
+
+                        // 5. Generate random tilt
+                        final randomTilt = (math.Random().nextDouble() * 0.12) - 0.06;
+
+                        // 6. Save text and image URL to Firestore
+                        await FirebaseFirestore.instance.collection('memories').add({
+                          'date': dateController.text,
+                          'title': titleController.text,
+                          'note': noteController.text,
+                          'tilt': randomTilt,
+                          'imageUrl': imageUrl,
+                          'timestamp': FieldValue.serverTimestamp(),
+                        });
+
+                        if (context.mounted) Navigator.pop(context); // Close dialog
+                      } else {
+                        print("ImgBB Upload Failed: ${responseData['error']['message']}");
+                        setState(() => isUploading = false);
+                      }
                     } catch (e) {
                       print("Upload Error: $e");
                       setState(() => isUploading = false);
