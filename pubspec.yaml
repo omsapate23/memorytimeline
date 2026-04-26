@@ -39,6 +39,7 @@ dependencies:
   # UI Components
   timeline_tile: ^2.0.0
   qr_flutter: ^4.1.0
+  google_fonts: ^6.2.1
 
   # PDF & Printing Logic
   pdf: ^3.10.10
