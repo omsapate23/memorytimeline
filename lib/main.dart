@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:math' as math;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // NEW: For saving device login
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -60,7 +61,7 @@ class Memory {
   }
 }
 
-// --- 2. THE MAIN PAGE ---
+// --- 2. THE MAIN PAGE (Now with Admin Mode) ---
 class TimelinePage extends StatefulWidget {
   const TimelinePage({super.key});
 
@@ -69,7 +70,97 @@ class TimelinePage extends StatefulWidget {
 }
 
 class _TimelinePageState extends State<TimelinePage> {
+  // --- ADMIN MODE LOGIC ---
+  bool isAdmin = false;
+  int titleTapCount = 0;
+  DateTime lastTap = DateTime.now();
 
+  @override
+  void initState() {
+    super.initState();
+    _checkAdminStatus();
+  }
+
+  // Check if this device logged in before
+  Future<void> _checkAdminStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      isAdmin = prefs.getBool('isAdminDevice') ?? false;
+    });
+  }
+
+  // The hidden login dialog
+  Future<void> _showAdminLogin() async {
+    final passController = TextEditingController();
+    bool wrongPass = false;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFFFDF5E6),
+              title: Text("Secret Door 🗝️", style: GoogleFonts.gochiHand(fontSize: 28, color: Colors.brown[800])),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text("Enter the creator passcode to unlock edit mode on this device.", style: GoogleFonts.caveat(fontSize: 20)),
+                  TextField(
+                    controller: passController, 
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: "Passcode",
+                      errorText: wrongPass ? "Incorrect passcode" : null,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.brown[400]),
+                  onPressed: () async {
+                    // THE SECRET PASSWORD (You can change '2006' to anything!)
+                    if (passController.text == '2006') {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setBool('isAdminDevice', true);
+                      if (context.mounted) {
+                        setState(() => isAdmin = true);
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Creator Mode Unlocked ✨"), backgroundColor: Colors.pink));
+                      }
+                    } else {
+                      setDialogState(() => wrongPass = true);
+                    }
+                  },
+                  child: const Text("Unlock", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          }
+        );
+      }
+    );
+  }
+
+  // Hidden tap logic on the title
+  void _handleTitleTap() {
+    final now = DateTime.now();
+    if (now.difference(lastTap).inSeconds > 2) {
+      titleTapCount = 0; // Reset if they tap too slow
+    }
+    lastTap = now;
+    titleTapCount++;
+
+    if (titleTapCount >= 3 && !isAdmin) {
+      titleTapCount = 0;
+      _showAdminLogin();
+    }
+  }
+
+
+  // --- CRUD LOGIC ---
   Future<void> _deleteMemory(String memoryId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -260,7 +351,11 @@ class _TimelinePageState extends State<TimelinePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("our little memories ✨", style: GoogleFonts.gochiHand(fontSize: 34, color: Colors.brown[800])),
+        // The title is now clickable for the secret menu!
+        title: GestureDetector(
+          onTap: _handleTitleTap,
+          child: Text("our little memories ✨", style: GoogleFonts.gochiHand(fontSize: 34, color: Colors.brown[800])),
+        ),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -285,7 +380,7 @@ class _TimelinePageState extends State<TimelinePage> {
                   final memories = snapshot.data!.docs.map((doc) => Memory.fromFirestore(doc)).toList();
 
                   if (memories.isEmpty) {
-                    return Center(child: Text("No memories yet! 💖", style: GoogleFonts.caveat(fontSize: 28, color: Colors.brown[600])));
+                    return Center(child: Text(isAdmin ? "No memories yet! Click the camera to add one. 💖" : "No memories found.", style: GoogleFonts.caveat(fontSize: 28, color: Colors.brown[600])));
                   }
 
                   return ListView.builder(
@@ -300,6 +395,7 @@ class _TimelinePageState extends State<TimelinePage> {
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           child: PolaroidCard(
                             memory: memories[index],
+                            isAdmin: isAdmin, // Pass the admin status down!
                             onEdit: () => _showEditMemoryDialog(memories[index]),
                             onDelete: () => _deleteMemory(memories[index].id),
                           ),
@@ -313,12 +409,12 @@ class _TimelinePageState extends State<TimelinePage> {
                           children: [
                             Expanded(
                               child: isLeft 
-                                ? Padding(padding: const EdgeInsets.only(right: 60, left: 20), child: PolaroidCard(memory: memories[index], onEdit: () => _showEditMemoryDialog(memories[index]), onDelete: () => _deleteMemory(memories[index].id)))
+                                ? Padding(padding: const EdgeInsets.only(right: 60, left: 20), child: PolaroidCard(memory: memories[index], isAdmin: isAdmin, onEdit: () => _showEditMemoryDialog(memories[index]), onDelete: () => _deleteMemory(memories[index].id)))
                                 : const SizedBox(), 
                             ),
                             Expanded(
                               child: !isLeft 
-                                ? Padding(padding: const EdgeInsets.only(left: 60, right: 20), child: PolaroidCard(memory: memories[index], onEdit: () => _showEditMemoryDialog(memories[index]), onDelete: () => _deleteMemory(memories[index].id)))
+                                ? Padding(padding: const EdgeInsets.only(left: 60, right: 20), child: PolaroidCard(memory: memories[index], isAdmin: isAdmin, onEdit: () => _showEditMemoryDialog(memories[index]), onDelete: () => _deleteMemory(memories[index].id)))
                                 : const SizedBox(),
                             ),
                           ],
@@ -332,22 +428,24 @@ class _TimelinePageState extends State<TimelinePage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      // Only show the Floating Action Button if Admin
+      floatingActionButton: isAdmin ? FloatingActionButton(
         backgroundColor: Colors.pink[200],
         onPressed: _showAddMemoryDialog,
         child: const Icon(Icons.add_a_photo, color: Colors.white),
-      ),
+      ) : null,
     );
   }
 }
 
-// --- 3. THE POLAROID WIDGET (Using the Pink Ribbon Seal) ---
+// --- 3. THE POLAROID WIDGET ---
 class PolaroidCard extends StatefulWidget {
   final Memory memory;
+  final bool isAdmin; // Added to hide menu from visitors
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const PolaroidCard({super.key, required this.memory, required this.onEdit, required this.onDelete});
+  const PolaroidCard({super.key, required this.memory, required this.isAdmin, required this.onEdit, required this.onDelete});
 
   @override
   State<PolaroidCard> createState() => _PolaroidCardState();
@@ -376,11 +474,10 @@ class _PolaroidCardState extends State<PolaroidCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // THE IMAGE CONTAINER
                   GestureDetector(
                     onTap: () {
                       setState(() {
-                        _isRevealed = !_isRevealed; // Break the seal!
+                        _isRevealed = !_isRevealed; 
                       });
                     },
                     child: Stack(
@@ -395,27 +492,24 @@ class _PolaroidCardState extends State<PolaroidCard> {
                             ? const Center(child: Icon(Icons.favorite_border, color: Colors.grey, size: 50))
                             : Image.network(widget.memory.imageUrl, fit: BoxFit.cover),
                         ),
-                        // Digicam Timestamp
                         Positioned(
                           bottom: 8, right: 12,
                           child: Text(widget.memory.date.toUpperCase(), style: GoogleFonts.vt323(color: Colors.orangeAccent, fontSize: 22, shadows: [const Shadow(color: Colors.black, blurRadius: 3)])),
                         ),
-                        
-                        // THE WAX SEAL EASTER EGG (Pink Ribbon Asset)
                         AnimatedPositioned(
                           duration: const Duration(milliseconds: 600),
                           curve: Curves.easeInOutBack, 
-                          bottom: _isRevealed ? -110 : -115, // Adjusted to fall further down
+                          bottom: _isRevealed ? -110 : -115, 
                           child: AnimatedOpacity(
                             duration: const Duration(milliseconds: 400),
                             opacity: _isRevealed ? 0.0 : 1.0, 
-                            child: Container(
-                              height: 205, // Scaled slightly to show the cute ribbon well
+                            child: SizedBox(
+                              height: 205, 
                               width: 205,
                               child: Image.asset(
                                 'assets/ribbon.png', 
                                 fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) => const Icon(Icons.error, color: Colors.red),
+                                errorBuilder: (context, error, stackTrace) => const Icon(Icons.favorite, color: Colors.pinkAccent),
                               ),
                             ),
                           ),
@@ -427,7 +521,6 @@ class _PolaroidCardState extends State<PolaroidCard> {
                   const SizedBox(height: 16),
                   Text(widget.memory.title, style: GoogleFonts.gochiHand(color: Colors.brown[900], fontSize: 28, fontWeight: FontWeight.bold)),
                   
-                  // THE HIDDEN NOTE DROPDOWN
                   AnimatedSize(
                     duration: const Duration(milliseconds: 500),
                     curve: Curves.easeInOutCubic,
@@ -443,24 +536,24 @@ class _PolaroidCardState extends State<PolaroidCard> {
               ),
             ),
             
-            // "Washi Tape" Sticker
             Positioned(top: -15, left: 0, right: 0, child: Center(child: Transform.rotate(angle: -0.06, child: Container(width: 80, height: 28, color: Colors.pink.withOpacity(0.35))))),
             
-            // Edit / Delete Popup Menu Overlay
-            Positioned(
-              top: 8, right: 8,
-              child: PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: Colors.white, shadows: [Shadow(color: Colors.black45, blurRadius: 4)]),
-                onSelected: (value) {
-                  if (value == 'edit') widget.onEdit();
-                  if (value == 'delete') widget.onDelete();
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 8), Text("Edit")])),
-                  const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 20), SizedBox(width: 8), Text("Delete")])),
-                ],
+            // Only show the 3-dot menu if the user is an Admin
+            if (widget.isAdmin)
+              Positioned(
+                top: 8, right: 8,
+                child: PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: Colors.white, shadows: [Shadow(color: Colors.black45, blurRadius: 4)]),
+                  onSelected: (value) {
+                    if (value == 'edit') widget.onEdit();
+                    if (value == 'delete') widget.onDelete();
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 8), Text("Edit")])),
+                    const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 20), SizedBox(width: 8), Text("Delete")])),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -468,7 +561,7 @@ class _PolaroidCardState extends State<PolaroidCard> {
   }
 }
 
-// --- 4. THE SMOOTH SWEEPING PAINTER (Unchanged) ---
+// --- 4. THE SMOOTH SWEEPING PAINTER ---
 class SmoothSweepingPainter extends CustomPainter {
   final bool isLeft;
   final bool isLast;
