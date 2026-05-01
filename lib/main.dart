@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'dart:math' as math;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart'; // NEW: For saving device login
+import 'package:shared_preferences/shared_preferences.dart'; 
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -61,7 +61,7 @@ class Memory {
   }
 }
 
-// --- 2. THE MAIN PAGE (Now with Admin Mode) ---
+// --- 2. THE MAIN PAGE ---
 class TimelinePage extends StatefulWidget {
   const TimelinePage({super.key});
 
@@ -70,7 +70,6 @@ class TimelinePage extends StatefulWidget {
 }
 
 class _TimelinePageState extends State<TimelinePage> {
-  // --- ADMIN MODE LOGIC ---
   bool isAdmin = false;
   int titleTapCount = 0;
   DateTime lastTap = DateTime.now();
@@ -81,7 +80,6 @@ class _TimelinePageState extends State<TimelinePage> {
     _checkAdminStatus();
   }
 
-  // Check if this device logged in before
   Future<void> _checkAdminStatus() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -89,7 +87,6 @@ class _TimelinePageState extends State<TimelinePage> {
     });
   }
 
-  // The hidden login dialog
   Future<void> _showAdminLogin() async {
     final passController = TextEditingController();
     bool wrongPass = false;
@@ -121,7 +118,6 @@ class _TimelinePageState extends State<TimelinePage> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.brown[400]),
                   onPressed: () async {
-                    // THE SECRET PASSWORD (You can change '2006' to anything!)
                     if (passController.text == '2006') {
                       final prefs = await SharedPreferences.getInstance();
                       await prefs.setBool('isAdminDevice', true);
@@ -144,12 +140,9 @@ class _TimelinePageState extends State<TimelinePage> {
     );
   }
 
-  // Hidden tap logic on the title
   void _handleTitleTap() {
     final now = DateTime.now();
-    if (now.difference(lastTap).inSeconds > 2) {
-      titleTapCount = 0; // Reset if they tap too slow
-    }
+    if (now.difference(lastTap).inSeconds > 2) titleTapCount = 0; 
     lastTap = now;
     titleTapCount++;
 
@@ -159,8 +152,6 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-
-  // --- CRUD LOGIC ---
   Future<void> _deleteMemory(String memoryId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -208,7 +199,6 @@ class _TimelinePageState extends State<TimelinePage> {
                     TextField(controller: titleController, decoration: const InputDecoration(labelText: "Title"), style: GoogleFonts.caveat(fontSize: 20)),
                     TextField(controller: noteController, decoration: const InputDecoration(labelText: "Note"), maxLines: 3, style: GoogleFonts.caveat(fontSize: 20)),
                     const SizedBox(height: 20),
-                    
                     ElevatedButton.icon(
                       onPressed: () async {
                         final bytes = await ImagePickerWeb.getImageAsBytes();
@@ -239,7 +229,9 @@ class _TimelinePageState extends State<TimelinePage> {
                         final response = await http.post(apiUrl, body: {'key': apiKey, 'image': base64Image});
                         final Map<String, dynamic> responseData = jsonDecode(response.body);
                         if (responseData['success'] == true) {
-                          finalImageUrl = responseData['data']['url'];
+                          finalImageUrl = responseData['data']['display_url'] ?? responseData['data']['url'];
+                        } else {
+                          throw Exception(responseData['error']['message'] ?? "ImgBB Edit Upload Failed");
                         }
                       }
 
@@ -252,7 +244,16 @@ class _TimelinePageState extends State<TimelinePage> {
 
                       if (context.mounted) Navigator.pop(context); 
                     } catch (e) {
-                      print("Update Error: $e");
+                      print("🚨 EDIT UPLOAD ERROR: $e");
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Edit Failed: $e", style: const TextStyle(color: Colors.white)),
+                            backgroundColor: Colors.red[400],
+                            duration: const Duration(seconds: 5),
+                          )
+                        );
+                      }
                       setState(() => isUploading = false);
                     }
                   },
@@ -310,27 +311,48 @@ class _TimelinePageState extends State<TimelinePage> {
                   onPressed: isUploading ? null : () async {
                     if (selectedImageBytes == null || titleController.text.isEmpty) return;
                     setState(() => isUploading = true);
+                    
                     try {
                       final String base64Image = base64Encode(selectedImageBytes!);
                       final String apiKey = '1900287d47a36f5b9ef8a5882c3b9c19'; 
                       final Uri apiUrl = Uri.parse('https://api.imgbb.com/1/upload');
-                      final response = await http.post(apiUrl, body: {'key': apiKey, 'image': base64Image});
+                      
+                      final response = await http.post(apiUrl, body: {
+                        'key': apiKey, 
+                        'image': base64Image
+                      });
+                      
                       final Map<String, dynamic> responseData = jsonDecode(response.body);
 
                       if (responseData['success'] == true) {
-                        final String imageUrl = responseData['data']['url'];
+                        // Use the optimized display URL if available
+                        final String imageUrl = responseData['data']['display_url'] ?? responseData['data']['url'];
                         final randomTilt = (math.Random().nextDouble() * 0.12) - 0.06;
+                        
                         await FirebaseFirestore.instance.collection('memories').add({
                           'date': dateController.text,
                           'title': titleController.text,
                           'note': noteController.text,
                           'tilt': randomTilt,
                           'imageUrl': imageUrl,
-                          'timestamp': FieldValue.serverTimestamp(),
+                          'timestamp': Timestamp.now(), 
                         });
+                        
                         if (context.mounted) Navigator.pop(context); 
+                      } else {
+                        throw Exception(responseData['error']['message'] ?? "ImgBB Upload Failed");
                       }
                     } catch (e) {
+                      print("🚨 UPLOAD ERROR: $e"); 
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Upload Failed: $e", style: const TextStyle(color: Colors.white)),
+                            backgroundColor: Colors.red[400],
+                            duration: const Duration(seconds: 5),
+                          )
+                        );
+                      }
                       setState(() => isUploading = false);
                     }
                   },
@@ -347,11 +369,8 @@ class _TimelinePageState extends State<TimelinePage> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isMobile = MediaQuery.of(context).size.width < 800;
-
     return Scaffold(
       appBar: AppBar(
-        // The title is now clickable for the secret menu!
         title: GestureDetector(
           onTap: _handleTitleTap,
           child: Text("our little memories ✨", style: GoogleFonts.gochiHand(fontSize: 34, color: Colors.brown[800])),
@@ -390,18 +409,6 @@ class _TimelinePageState extends State<TimelinePage> {
                       final isLeft = index % 2 == 0; 
                       final isLast = index == memories.length - 1;
                       
-                      if (isMobile) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                          child: PolaroidCard(
-                            memory: memories[index],
-                            isAdmin: isAdmin, // Pass the admin status down!
-                            onEdit: () => _showEditMemoryDialog(memories[index]),
-                            onDelete: () => _deleteMemory(memories[index].id),
-                          ),
-                        );
-                      }
-
                       return CustomPaint(
                         painter: SmoothSweepingPainter(isLeft: isLeft, isLast: isLast),
                         child: Row(
@@ -428,7 +435,6 @@ class _TimelinePageState extends State<TimelinePage> {
           ),
         ],
       ),
-      // Only show the Floating Action Button if Admin
       floatingActionButton: isAdmin ? FloatingActionButton(
         backgroundColor: Colors.pink[200],
         onPressed: _showAddMemoryDialog,
@@ -441,7 +447,7 @@ class _TimelinePageState extends State<TimelinePage> {
 // --- 3. THE POLAROID WIDGET ---
 class PolaroidCard extends StatefulWidget {
   final Memory memory;
-  final bool isAdmin; // Added to hide menu from visitors
+  final bool isAdmin; 
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -490,7 +496,21 @@ class _PolaroidCardState extends State<PolaroidCard> {
                           color: Colors.grey[200],
                           child: widget.memory.imageUrl.isEmpty 
                             ? const Center(child: Icon(Icons.favorite_border, color: Colors.grey, size: 50))
-                            : Image.network(widget.memory.imageUrl, fit: BoxFit.cover),
+                            : Image.network(
+                                widget.memory.imageUrl, 
+                                fit: BoxFit.contain, 
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child; 
+                                  return Center(
+                                    child: CircularProgressIndicator(
+                                      color: Colors.pinkAccent[100],
+                                      value: loadingProgress.expectedTotalBytes != null
+                                          ? loadingProgress.cumulativeBytesLoaded / (loadingProgress.expectedTotalBytes ?? 1)
+                                          : null,
+                                    ),
+                                  );
+                                },
+                              ),
                         ),
                         Positioned(
                           bottom: 8, right: 12,
@@ -519,7 +539,10 @@ class _PolaroidCardState extends State<PolaroidCard> {
                   ),
                   
                   const SizedBox(height: 16),
-                  Text(widget.memory.title, style: GoogleFonts.gochiHand(color: Colors.brown[900], fontSize: 28, fontWeight: FontWeight.bold)),
+                  Text(
+                    widget.memory.title, 
+                    style: GoogleFonts.gochiHand(color: Colors.brown[900], fontSize: 28, fontWeight: FontWeight.bold)
+                  ),
                   
                   AnimatedSize(
                     duration: const Duration(milliseconds: 500),
@@ -538,7 +561,6 @@ class _PolaroidCardState extends State<PolaroidCard> {
             
             Positioned(top: -15, left: 0, right: 0, child: Center(child: Transform.rotate(angle: -0.06, child: Container(width: 80, height: 28, color: Colors.pink.withOpacity(0.35))))),
             
-            // Only show the 3-dot menu if the user is an Admin
             if (widget.isAdmin)
               Positioned(
                 top: 8, right: 8,
@@ -573,26 +595,22 @@ class SmoothSweepingPainter extends CustomPainter {
     final w = size.width; final h = size.height;
     final startX = w / 2; final bowX = isLeft ? w * 0.35 : w * 0.65; 
     final path = Path()..moveTo(startX, 0)..cubicTo(startX, h * 0.25, bowX, h * 0.15, bowX, h * 0.5)..cubicTo(bowX, h * 0.85, startX, h * 0.75, startX, h);
-    final dottedPath = _createDashedPath(path, dashLength: 6.0, dashSpace: 6.0);
-    canvas.drawPath(dottedPath, paint);
+    
+    final dest = Path();
+    for (final metric in path.computeMetrics()) {
+      double distance = 0.0;
+      while (distance < metric.length) {
+        dest.addPath(metric.extractPath(distance, distance + 6.0), Offset.zero);
+        distance += 12.0; 
+      }
+    }
+    canvas.drawPath(dest, paint);
 
     if (!isLast) {
       final arrowPaint = Paint()..color = Colors.brown.withOpacity(0.7)..strokeWidth = 3.5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeJoin = StrokeJoin.round; 
       final arrowPath = Path()..moveTo(bowX - 10, (h * 0.5) - 10)..lineTo(bowX, h * 0.5)..lineTo(bowX + 10, (h * 0.5) - 10);
       canvas.drawPath(arrowPath, arrowPaint);
     }
-  }
-
-  Path _createDashedPath(Path source, {required double dashLength, required double dashSpace}) {
-    final dest = Path();
-    for (final metric in source.computeMetrics()) {
-      double distance = 0.0;
-      while (distance < metric.length) {
-        dest.addPath(metric.extractPath(distance, distance + dashLength), Offset.zero);
-        distance += dashLength + dashSpace;
-      }
-    }
-    return dest;
   }
   @override bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
