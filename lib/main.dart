@@ -102,7 +102,7 @@ class _TimelinePageState extends State<TimelinePage> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text("Enter the creator passcode to unlock edit mode on this device.", style: GoogleFonts.caveat(fontSize: 20)),
+                  Text("Enter the creator passcode to unlock edit mode on this device.(Hint:first encounter)", style: GoogleFonts.caveat(fontSize: 20)),
                   TextField(
                     controller: passController, 
                     obscureText: true,
@@ -118,7 +118,7 @@ class _TimelinePageState extends State<TimelinePage> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.brown[400]),
                   onPressed: () async {
-                    if (passController.text == '2006') {
+                    if (passController.text == '14102025') {
                       final prefs = await SharedPreferences.getInstance();
                       await prefs.setBool('isAdminDevice', true);
                       if (context.mounted) {
